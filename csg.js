@@ -431,7 +431,7 @@ CSG.prototype = {
       var n = 0;
 		this.polygons.map(function(p) {                  // then we dump all polygons
          result += "<volume>\n";
-         if(p.vertices.length<3) 
+         if(p.vertices.length<3)
             return;
 			var r = 1, g = 0.4, b = 1, a = 1, colorSet = false;
 			if(p.shared && p.shared.color) {
@@ -943,11 +943,11 @@ CSG.prototype = {
 		} else {
 			var mybounds = this.getBounds();
 			var otherbounds = csg.getBounds();
-         // [0].x/y  
+         // [0].x/y
          //    +-----+
          //    |     |
          //    |     |
-         //    +-----+ 
+         //    +-----+
          //          [1].x/y
          //return false;
          //echo(mybounds,"=",otherbounds);
@@ -2582,6 +2582,136 @@ CSG.Plane.prototype = {
 	}
 };
 
+	CSG.Spline = {
+	};
+	/**
+	 * Implementation of Catmull-Rom splines
+	 * http://en.wikipedia.org/wiki/Catmull-Rom_spline#Catmull.E2.80.93Rom_spline
+	 * http://steve.hollasch.net/cgindex/curves/catmull-rom.html
+	 *
+	 * @param {Array} points Array of key points to pass
+	 * @param {Number} steps Number of generated intermidiate points between key points pairs
+	 *
+	 */
+	CSG.Spline.CatmullRom = function(points, steps) {
+		if (points.length < 4)
+			throw new Error("CSG.Spline.CatmullRom error: at least 4 points required");
+		this.points = points;
+		this._plength = this.points.length;
+		//if the first point is the same as the last - it's a loop
+		this.loop = this.points[0].equals(this.points[this.points.length - 1]);
+		this.steps = steps|0||1; //convert to int
+		this.cmMatrix = new CSG.Matrix4x4([-1, 3,-3, 1, 2,-5, 4,-1,-1, 0, 1, 0, 0, 2, 0, 0]);
+		this._stop = this.points.length - (this.loop ? 1 : 3); //stop index
+		this._key = 0; //current key index
+		this._step = 0; //current step in segment
+	};
+
+	CSG.Spline.CatmullRom.prototype = {
+		_multiply4DVector: function (v1, v2) {
+			var res = 0;
+			for(var i = 0; i < v1.length; i++)
+				res += v1[i] * v2[i];
+			return res;
+		},
+		length : function() {
+			//number of curve points - key and intermediate points
+			var nSegments, nPoints;
+			if (this.loop) {
+				nSegments = this.points.length; //each path point starts a segment
+				nPoints = nSegments * this.steps; //all segments are [0..steps-1)
+			} else {
+				nSegments = this.points.length - 3;
+				nPoints = nSegments * this.steps + 1; //all segments are [0..steps-1) but the last is [0..steps-1]
+			}
+			return nPoints;
+		},
+		reset : function() {
+			this._key = 0;//current key index
+			this._step = 0;//current intermediate index
+		},
+		nextPolygon : function(pol) {
+			var cur = this.next();
+			if (cur) {
+				var nrm = pol.plane.normal,
+					cosQ = nrm.dot(cur.tangent),
+					Q = Math.acos(cosQ) * 180 / Math.PI;
+				return pol.translate(cur.point).rotate(cur.point, nrm.cross(cur.tangent), Q);
+			}
+			return null;
+		},
+		_getParams : function() {
+			if (this._key > this._stop) //run out of points
+				return null;
+
+			var ret = {
+					point0: this.points[this._key],
+					point1: this.points[this._key + 1],
+					point2: this.points[this._key + 2],
+					point3: this.points[this._key + 3],
+					t: this._step / this.steps
+				};
+
+			//advance the indices
+			//last segment, last point was generated
+			if (this._step == this.steps) {
+				this._key = this._stop + 1; //set invalid value
+
+			} else {//normal flow
+				this._step++;
+				if (this._step == this.steps) {
+					this._key++;
+					this._step = 0;
+				}
+				//last segment, last point
+				if (this._key == this._stop) {
+					this._key--;
+					this._step = this.steps;
+				}
+			}
+			return ret;
+		},
+		_getLoopParams : function() {
+			if (this._key > this._stop) //run out of points
+				return null;
+
+			var ret = {
+					point0: this.points[this._key],
+					point1: this.points[(this._key + 1) % this._plength],
+					point2: this.points[(this._key + 2) % this._plength],
+					point3: this.points[(this._key + 3) % this._plength],
+					t: this._step / this.steps
+				};
+
+			//advance the indices
+			//normal flow
+			this._step++;
+			if (this._step == this.steps) {
+				this._key++;
+				this._step = 0;
+			}
+			return ret;
+		},
+		next : function() {
+
+			var param = this.loop ? this._getLoopParams() : this._getParams();
+			var t = param.t,
+				res = this.cmMatrix.leftMultiplyVector([0.5*t*t*t,0.5*t*t,0.5*t,0.5]);
+
+			return {
+				point: new CSG.Vector3D(
+					this._multiply4DVector(res, [param.point0.x, param.point1.x, param.point2.x, param.point3.x]),
+					this._multiply4DVector(res, [param.point0.y, param.point1.y, param.point2.y, param.point3.y]),
+					this._multiply4DVector(res, [param.point0.z, param.point1.z, param.point2.z, param.point3.z])
+					),
+				tangent: new CSG.Vector3D(
+					 0.5*(param.point2.x -param.point0.x) + (2*param.point0.x - 5*param.point1.x + 4*param.point2.x -param.point3.x) * t + 1.5 * (-param.point0.x + 3*param.point1.x- 3*param.point2.x + param.point3.x)*t*t,
+					 0.5*(param.point2.y -param.point0.y) + (2*param.point0.y - 5*param.point1.y + 4*param.point2.y -param.point3.y) * t + 1.5 * (-param.point0.y + 3*param.point1.y- 3*param.point2.y + param.point3.y)*t*t,
+					 0.5*(param.point2.z -param.point0.z) + (2*param.point0.z - 5*param.point1.z + 4*param.point2.z -param.point3.z) * t + 1.5 * (-param.point0.z + 3*param.point1.z- 3*param.point2.z + param.point3.z)*t*t
+				).unit()
+			};
+		}
+	}
 
 // # class Polygon
 // Represents a convex polygon. The vertices used to initialize a polygon must
@@ -2820,7 +2950,7 @@ CSG.Polygon.prototype = {
 				if (!(csg instanceof CSG.Polygon)) {
 					throw new Error("CSG.Polygon.solidFromSlices callback error: CSG.Polygon expected");
 				}
-				csg.checkIfConvex();
+				//csg.checkIfConvex();
 
 				if (prev) {//generate walls
 					if (flipped === null) {//not generated yet
@@ -3504,92 +3634,86 @@ CSG.Matrix4x4.prototype = {
 		return new CSG.Matrix4x4(elements);
 	},
 
-	// Right multiply the matrix by a CSG.Vector3D (interpreted as 3 row, 1 column)
-	// (result = M*v)
-	// Fourth element is taken as 1
-	rightMultiply1x3Vector: function(v) {
-		var v0 = v._x;
-		var v1 = v._y;
-		var v2 = v._z;
-		var v3 = 1;
+	leftMultiplyVector: function(v) {
+		var v0 = v[0];
+		var v1 = v[1];
+		var v2 = v[2];
+		var v3 = v[3];
+		var x = v0 * this.elements[0] + v1 * this.elements[4] + v2 * this.elements[8] + v3 * this.elements[12];
+		var y = v0 * this.elements[1] + v1 * this.elements[5] + v2 * this.elements[9] + v3 * this.elements[13];
+		var z = v0 * this.elements[2] + v1 * this.elements[6] + v2 * this.elements[10] + v3 * this.elements[14];
+		var w = v0 * this.elements[3] + v1 * this.elements[7] + v2 * this.elements[11] + v3 * this.elements[15];
+		return [x,y,z,w];
+	},
+
+	rightMultiplyVector: function(v) {
+		var v0 = v[0];
+		var v1 = v[1];
+		var v2 = v[2];
+		var v3 = v[3];
 		var x = v0 * this.elements[0] + v1 * this.elements[1] + v2 * this.elements[2] + v3 * this.elements[3];
 		var y = v0 * this.elements[4] + v1 * this.elements[5] + v2 * this.elements[6] + v3 * this.elements[7];
 		var z = v0 * this.elements[8] + v1 * this.elements[9] + v2 * this.elements[10] + v3 * this.elements[11];
 		var w = v0 * this.elements[12] + v1 * this.elements[13] + v2 * this.elements[14] + v3 * this.elements[15];
+		return [x,y,z,w];
+	},
+
+	// Right multiply the matrix by a CSG.Vector3D (interpreted as 3 row, 1 column)
+	// (result = M*v)
+	// Fourth element is taken as 1
+	rightMultiply1x3Vector: function(v) {
+		var res = this.rightMultiplyVector([v._x, v._y, v._z, 1]);
 		// scale such that fourth element becomes 1:
-		if(w != 1) {
-			var invw = 1.0 / w;
-			x *= invw;
-			y *= invw;
-			z *= invw;
+		if(res[3] != 1) {
+			var invw = 1.0 / res[3];
+			res[0] *= invw;
+			res[1] *= invw;
+			res[2] *= invw;
 		}
-		return new CSG.Vector3D(x, y, z);
+		return new CSG.Vector3D(res[0], res[1], res[2]);
 	},
 
 	// Multiply a CSG.Vector3D (interpreted as 3 column, 1 row) by this matrix
 	// (result = v*M)
 	// Fourth element is taken as 1
 	leftMultiply1x3Vector: function(v) {
-		var v0 = v._x;
-		var v1 = v._y;
-		var v2 = v._z;
-		var v3 = 1;
-		var x = v0 * this.elements[0] + v1 * this.elements[4] + v2 * this.elements[8] + v3 * this.elements[12];
-		var y = v0 * this.elements[1] + v1 * this.elements[5] + v2 * this.elements[9] + v3 * this.elements[13];
-		var z = v0 * this.elements[2] + v1 * this.elements[6] + v2 * this.elements[10] + v3 * this.elements[14];
-		var w = v0 * this.elements[3] + v1 * this.elements[7] + v2 * this.elements[11] + v3 * this.elements[15];
+		var res = this.leftMultiplyVector([v._x, v._y, v._z, 1]);
 		// scale such that fourth element becomes 1:
-		if(w != 1) {
-			var invw = 1.0 / w;
-			x *= invw;
-			y *= invw;
-			z *= invw;
+		if(res[3] != 1) {
+			var invw = 1.0 / res[3];
+			res[0] *= invw;
+			res[1] *= invw;
+			res[2] *= invw;
 		}
-		return new CSG.Vector3D(x, y, z);
+		return new CSG.Vector3D(res[0], res[1], res[2]);
 	},
 
 	// Right multiply the matrix by a CSG.Vector2D (interpreted as 2 row, 1 column)
 	// (result = M*v)
 	// Fourth element is taken as 1
 	rightMultiply1x2Vector: function(v) {
-		var v0 = v.x;
-		var v1 = v.y;
-		var v2 = 0;
-		var v3 = 1;
-		var x = v0 * this.elements[0] + v1 * this.elements[1] + v2 * this.elements[2] + v3 * this.elements[3];
-		var y = v0 * this.elements[4] + v1 * this.elements[5] + v2 * this.elements[6] + v3 * this.elements[7];
-		var z = v0 * this.elements[8] + v1 * this.elements[9] + v2 * this.elements[10] + v3 * this.elements[11];
-		var w = v0 * this.elements[12] + v1 * this.elements[13] + v2 * this.elements[14] + v3 * this.elements[15];
+		var res = this.rightMultiplyVector([v._x, v._y, 0, 1]);
 		// scale such that fourth element becomes 1:
-		if(w != 1) {
-			var invw = 1.0 / w;
-			x *= invw;
-			y *= invw;
-			z *= invw;
+		if(res[3] != 1) {
+			var invw = 1.0 / res[3];
+			res[0] *= invw;
+			res[1] *= invw;
 		}
-		return new CSG.Vector2D(x, y);
+		return new CSG.Vector2D(res[0], res[1]);
 	},
 
 	// Multiply a CSG.Vector2D (interpreted as 2 column, 1 row) by this matrix
 	// (result = v*M)
 	// Fourth element is taken as 1
 	leftMultiply1x2Vector: function(v) {
-		var v0 = v.x;
-		var v1 = v.y;
-		var v2 = 0;
-		var v3 = 1;
-		var x = v0 * this.elements[0] + v1 * this.elements[4] + v2 * this.elements[8] + v3 * this.elements[12];
-		var y = v0 * this.elements[1] + v1 * this.elements[5] + v2 * this.elements[9] + v3 * this.elements[13];
-		var z = v0 * this.elements[2] + v1 * this.elements[6] + v2 * this.elements[10] + v3 * this.elements[14];
-		var w = v0 * this.elements[3] + v1 * this.elements[7] + v2 * this.elements[11] + v3 * this.elements[15];
+		var res = this.leftMultiplyVector([v._x, v._y, 0, 1]);
 		// scale such that fourth element becomes 1:
-		if(w != 1) {
-			var invw = 1.0 / w;
-			x *= invw;
-			y *= invw;
-			z *= invw;
+		if(res[3] != 1) {
+			var invw = 1.0 / res[3];
+			res[0] *= invw;
+			res[1] *= invw;
 		}
-		return new CSG.Vector2D(x, y);
+		return new CSG.Vector2D(res[0], res[1]);
 	},
 
 	// determine whether this matrix is a mirroring transformation
