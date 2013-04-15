@@ -41,12 +41,30 @@ function main(params) {
 	});
 */
 	//make a loop
-	//points.push(new CSG.Vector3D(points[0].x, points[0].y, 35));
-	//points.push(new CSG.Vector3D(points[0].x, points[0].y, 18));
-	//points.push(new CSG.Vector3D(points[0].x, points[0].y, 1));
+	points.push(new CSG.Vector3D(points[0].x, points[0].y, 35));
+	points.push(new CSG.Vector3D(points[0].x, points[0].y, 18));
+	points.push(new CSG.Vector3D(points[0].x, points[0].y, 0));
 
-	var spline = new CSG.Spline.CatmullRom(points, 5);
+	var spline = new CSG.Spline.CatmullRom(points, 2);
+window.spline = spline;
+/*
+	var arrow = CSG.cylinder({
+		start: [0,0,0],
+		end: [0,0,30],
+		radius: 0.1
+	}).setColor([0,0.5,0.5]).union(CSG.cylinder({
+		start: [0,0,30],
+		end: [0,0,32],
+		radius: 0.3,
+		radiusEnd: 0.01
+	}).setColor([1,0,0]));
 
+	var pnt, arr = [];
+	while(pnt = spline.csgNext(arrow, new CSG.Vector3D([0,0,1]))) {
+		arr.push(spline._key == 38 ? pnt.setColor([0,0,1]) : pnt);
+	};
+	return arr;
+*/
 	var radius = 50,
 		height = 60,
 		vec = new CSG.Vector3D(0, 5, 0),
@@ -71,7 +89,7 @@ function main(params) {
 		numslices: spline.length(),
 		loop: spline.loop,
 		callback: function(t, slice) {
-			return spline.nextPolygon(this);
+			return spline.csgNext(this);
 		}
 	});
 }

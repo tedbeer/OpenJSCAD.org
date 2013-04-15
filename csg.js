@@ -2596,10 +2596,12 @@ CSG.Plane.prototype = {
 	CSG.Spline.CatmullRom = function(points, steps) {
 		if (points.length < 4)
 			throw new Error("CSG.Spline.CatmullRom error: at least 4 points required");
-		this.points = points;
-		this._plength = this.points.length;
 		//if the first point is the same as the last - it's a loop
-		this.loop = this.points[0].equals(this.points[this.points.length - 1]);
+		var bLoop = points[0].equals(points[points.length - 1]);
+
+		this.points = points.slice(bLoop ? 1 : 0);
+		this._plength = this.points.length;
+		this.loop = bLoop;
 		this.steps = steps|0||1; //convert to int
 		this.cmMatrix = new CSG.Matrix4x4([-1, 3,-3, 1, 2,-5, 4,-1,-1, 0, 1, 0, 0, 2, 0, 0]);
 		this._stop = this.points.length - (this.loop ? 1 : 3); //stop index
@@ -2630,13 +2632,23 @@ CSG.Plane.prototype = {
 			this._key = 0;//current key index
 			this._step = 0;//current intermediate index
 		},
-		nextPolygon : function(pol) {
+		//TODO: can I always use [0,0,1] as a normal ?
+		csgNext : function(csg, nrm) {
 			var cur = this.next();
 			if (cur) {
-				var nrm = pol.plane.normal,
-					cosQ = nrm.dot(cur.tangent),
-					Q = Math.acos(cosQ) * 180 / Math.PI;
-				return pol.translate(cur.point).rotate(cur.point, nrm.cross(cur.tangent), Q);
+				if (!nrm)
+					nrm = csg.plane.normal;
+
+				var cosQ = nrm.dot(cur.tangent),
+					Q = Math.acos(cosQ) * 180 / Math.PI,
+					axe = nrm.cross(cur.tangent);
+					if (axe.lengthSquared() == 0) {//nrm and cur.tangent are collinear
+						if (nrm.x != 0 || nrm.y != 0)
+							axe = new CSG.Vector3D(nrm.y, nrm.x, nrm.z);
+						else
+							axe = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
+					}
+				return csg.translate(cur.point).rotate(cur.point, axe, Q);
 			}
 			return null;
 		},
@@ -2674,7 +2686,6 @@ CSG.Plane.prototype = {
 		_getLoopParams : function() {
 			if (this._key > this._stop) //run out of points
 				return null;
-
 			var ret = {
 					point0: this.points[this._key],
 					point1: this.points[(this._key + 1) % this._plength],
@@ -2693,8 +2704,10 @@ CSG.Plane.prototype = {
 			return ret;
 		},
 		next : function() {
-
 			var param = this.loop ? this._getLoopParams() : this._getParams();
+			if (!param)
+				return null;
+
 			var t = param.t,
 				res = this.cmMatrix.leftMultiplyVector([0.5*t*t*t,0.5*t*t,0.5*t,0.5]);
 
