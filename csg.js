@@ -2648,6 +2648,17 @@ CSG.Plane.prototype = {
 						else
 							axe = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
 					}
+/*
+console.log(axe+'', ' Q:', Q|0);
+
+if (this.lastTangent) {
+	//calculate angle between points
+	var cosF = this.lastTangent.dot(cur.tangent),
+		F = Math.acos(cosF) * 180 / Math.PI;
+	console.warn('angle: ', F);
+}
+this.lastTangent = cur.tangent;
+*/
 				return csg.translate(cur.point).rotate(cur.point, axe, Q);
 			}
 			return null;
@@ -2963,6 +2974,7 @@ CSG.Polygon.prototype = {
 				if (!(csg instanceof CSG.Polygon)) {
 					throw new Error("CSG.Polygon.solidFromSlices callback error: CSG.Polygon expected");
 				}
+console.log('********* ' + csg);
 				//csg.checkIfConvex();
 
 				if (prev) {//generate walls
@@ -2991,10 +3003,14 @@ CSG.Polygon.prototype = {
 			} //else - already generated
 		} else {
 			//save top and bottom
-			//TODO: flip if necessary
 			polygons.unshift(flipped ? bottom : bottom.flipped());
 			polygons.push(flipped ? top.flipped() : top);
 		}
+		var g = bottom.extrude(bottom.plane.normal).setColor(0,1,0);
+		var b = top.extrude(new CSG.Vector3D([-0.02,-0.97, 0.26])).setColor(0,0,1);
+		//var b = top.extrude(bottom.plane.normal).setColor(0,0,1);
+		//return b;//g;//.union(b);
+		//polygons = [flipped ? bottom : bottom.flipped(), flipped ? top.flipped() : top];
 		return CSG.fromPolygons(polygons);
 	},
 	/**
@@ -3007,7 +3023,7 @@ CSG.Polygon.prototype = {
 		var bottomPoints = bottom.vertices.slice(0),//make a copy
 			topPoints = top.vertices.slice(0),//make a copy
 			color = top.shared || null;
-
+var bN = bottom.plane.normal;
 		//check if bottom perimeter is closed
 		if (!bottomPoints[0].pos.equals(bottomPoints[bottomPoints.length - 1].pos)) {
 			bottomPoints.push(bottomPoints[0]);
@@ -3017,6 +3033,9 @@ CSG.Polygon.prototype = {
 		if (!topPoints[0].pos.equals(topPoints[topPoints.length - 1].pos)) {
 			topPoints.push(topPoints[0]);
 		}
+console.log('------------------------- addWalls:', bFlipped);
+console.log('bottom: ', bottomPoints.map(function(point){return point+''}));
+console.log('top: ', topPoints.map(function(point){return point+''}));
 		if (bFlipped) {
 			bottomPoints = bottomPoints.reverse();
 			topPoints = topPoints.reverse();
@@ -3059,10 +3078,30 @@ CSG.Polygon.prototype = {
 					}
 				}//for
 			}
+		} else { //find the minimal side length for the first bottom point
+			var point = bottomPoints[0],
+				minlen = Infinity,
+				topInd = 0;
+			for (var i = 0; i < iTopLen; i++) {
+				len = topPoints[i].pos.distanceToSquared(point.pos);
+				if (len < minlen) {
+					minlen = len;
+					topInd = i;
+				}
+				console.info('i: len to bottom: ', topPoints[i].pos.dot(bottomPoints[i].pos));
+			}
+			//shift points to match
+			while(topInd) {
+				topPoints.push(topPoints.shift());
+				topInd--;
+			}
 		}//if
 		//sort by index
 		aMin.sort(fnSortByIndex);
 		var getTriangle = function addWallsPutTriangle (pointA, pointB, pointC, color) {
+//console.log('getTriangle # A:' + pointA +' B:' + pointB + ' C:' + pointC);
+var AB = pointA.pos.distanceToSquared(pointB.pos),BC = pointB.pos.distanceToSquared(pointC.pos),AC = pointA.pos.distanceToSquared(pointC.pos);
+console.log('getTriangle # AB:' + AB +' BC:' + BC + ' AC:' + AC);
 			return new CSG.Polygon([pointA, pointB, pointC], color);
 			//return bFlipped ? triangle.flipped() : triangle;
 		};
@@ -3070,8 +3109,31 @@ CSG.Polygon.prototype = {
 		var bpoint = bottomPoints[0],
 			tpoint = topPoints[0],
 			secondPoint,
-			nBotFacet, nTopFacet; //length of triangle facet side
+			nBotFacet, nTopFacet, //length of triangle facet side
+			iB, iT, iMax;
+console.log('iMax: ', iTopLen + iBotLen);
+		if (iExtra == 0) {//simple case - no need complexity
+			//iTopLen == iBotLen
+			for (iB = 0, iT = 0, iMax = iTopLen + iBotLen; iB + iT < iMax;) {
+				if (iB <= iT) {
+console.log('<<<<<<<<<<');
+					secondPoint = bottomPoints[++iB];
+					walls.push(getTriangle(
+						tpoint, bpoint, secondPoint, color
+					));
+					bpoint = secondPoint;
+				} else {
+console.log('>>>>>>>>');
+					secondPoint = topPoints[++iT];
+					walls.push(getTriangle(
+						secondPoint, tpoint, bpoint, color
+					));
+					tpoint = secondPoint;
+				}
+			}
+		} else //complex case
 		for (var iB = 0, iT = 0, iMax = iTopLen + iBotLen; iB + iT < iMax;) {
+color = new CSG.Polygon.Shared(hsl2rgb((iB + iT) / iMax,1,0.5));
 			if (aMin.length) {
 				if (bMoreTops && iT == aMin[0].index) {//one vertex is on the bottom, 2 - on the top
 					secondPoint = topPoints[++iT];
@@ -3104,18 +3166,22 @@ CSG.Polygon.prototype = {
 				nTopFacet = Infinity;
 			}
 			if (nBotFacet <= nTopFacet) {
+console.log('<<<<<<<<<<nBotFacet: ', nBotFacet, ' nTopFacet:', nTopFacet);
 				secondPoint = bottomPoints[++iB];
 				walls.push(getTriangle(
 					tpoint, bpoint, secondPoint, color
 				));
 				bpoint = secondPoint;
 			} else if (iT < iTopLen) { //nTopFacet < Infinity
+console.log('>>>>>>>>nBotFacet: ', nBotFacet, ' nTopFacet:', nTopFacet);
 				secondPoint = topPoints[++iT];
 				//console.log('<<< top: ' + secondPoint + ', ' + tpoint + ', bottom: ' + bpoint);
 				walls.push(getTriangle(
 					secondPoint, tpoint, bpoint, color
 				));
 				tpoint = secondPoint;
+			} else {
+console.log('?????????nBotFacet: ', nBotFacet, ' nTopFacet:', nTopFacet);
 			};
 		}
 		return walls;

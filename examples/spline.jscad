@@ -41,11 +41,11 @@ function main(params) {
 	});
 */
 	//make a loop
-	points.push(new CSG.Vector3D(points[0].x, points[0].y, 35));
-	points.push(new CSG.Vector3D(points[0].x, points[0].y, 18));
+//	points.push(new CSG.Vector3D(points[0].x, points[0].y, 35));
+//	points.push(new CSG.Vector3D(points[0].x, points[0].y, 18));
 //	points.push(new CSG.Vector3D(points[0].x, points[0].y, 0));
 
-	var spline = new CSG.Spline.CatmullRom(points, 1);
+	var spline = new CSG.Spline.CatmullRom(points.slice(4, 8), 2);
 window.spline = spline;
 /*
 	var arrow = CSG.cylinder({
@@ -76,20 +76,21 @@ window.spline = spline;
 					vec.rotateZ(1 * angle),
 					vec.rotateZ(2 * angle),
 					vec.rotateZ(3 * angle),
-					vec.rotateZ(4 * angle)
-				]);
+					vec.rotateZ(4 * angle),
+					vec
+				]).rotateY(90);
 
-
+/*
     pent = pent.extrude([0,0,0.1]);
     var pnt, arr = [], l = spline.length(), t=0;
 	while(pnt = spline.csgNext(pent, new CSG.Vector3D([0,0,1]))) {
 		arr.push(pnt.setColor(hsl2rgb(t/l,1,0.5)));t++;
 	}
 	return arr;
-
+*/
 
 	return pent.solidFromSlices({
-		numslices: spline.length(),
+		numslices: 2,//spline.length(),
 		loop: spline.loop,
 		callback: function(t, slice) {
 			return spline.csgNext(this);
