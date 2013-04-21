@@ -2607,6 +2607,7 @@ CSG.Plane.prototype = {
 		this._stop = this.points.length - (this.loop ? 1 : 3); //stop index
 		this._key = 0; //current key index
 		this._step = 0; //current step in segment
+		this.current = null;
 	};
 
 	CSG.Spline.CatmullRom.prototype = {
@@ -2631,26 +2632,77 @@ CSG.Plane.prototype = {
 		reset : function() {
 			this._key = 0;//current key index
 			this._step = 0;//current intermediate index
+			this.current = null;
+		},
+		//csg.translate.rotate messes up points
+		//
+		_transform: function (csg, center, axis, degrees) {
+//console.log(' axis: ' + axis + ' degrees: ' + degrees);
+			//combined transformation
+			//center = csg.vertices[0].pos.add(center);
+			var mx = CSG.Matrix4x4.translation(center);/*.multiply(
+				CSG.Matrix4x4.rotation(center, axis, degrees)
+				);*/
+			//var mx2 = CSG.Matrix4x4.rotation(center, axis, degrees);
+
+			this._dbg = {
+				matrix: mx,
+				axis: axis,
+				center: center,
+				degrees: degrees,
+				toString: function(){
+					return this.matrix + '\ncenter:' +
+							this.center + '\naxis:' +
+							this.axis + '\nangle:' + this.degrees;
+				}
+			};
+			if (csg instanceof CSG.Polygon) {
+console.log('**************');
+//console.log('center: ' + center + ' axis: ' + axis + ' degrees: ' + degrees, 'mx.isMirroring: ', mx.isMirroring());
+//console.log('_transform: ' + csg.vertices.map(function(v){
+// 	return v.pos+'';
+// }));
+				var points = [];
+				for (var i = 0; i < csg.vertices.length; i++) {
+					var p = csg.vertices[i].pos.transform(mx);
+					points.push(
+						p.transform(
+							CSG.Matrix4x4.rotation(points[0] || p, axis, degrees)));
+				};
+console.log('vec: ' + points[0]);
+				var csg2 = CSG.Polygon.createFromPoints(points);
+//console.log('vertices[0]: ' + csg2.vertices[0]);
+				return csg2;
+			}
+			var csg2 = csg.transform(mx);
+			return csg2;
 		},
 		//TODO: can I always use [0,0,1] as a normal ?
-		csgNext : function(csg, nrm) {
-			var cur = this.next();
+		csgNext : function(csg, nrm, tr) {
+			var bStart = this._key == 0 && this._step == 0;
+			var cur = tr || this.next();
 			if (cur) {
+				this.cur = cur;
 				if (!nrm)
 					nrm = csg.plane.normal;
 
-				var cosQ = nrm.dot(cur.tangent),
+				var tangent = cur.tangent.negated(),
+					cosQ = nrm.unit().dot(tangent),
 					Q = Math.acos(cosQ) * 180 / Math.PI,
-					axe = nrm.cross(cur.tangent);
-					if (axe.lengthSquared() == 0) {//nrm and cur.tangent are collinear
-						if (nrm.x != 0 || nrm.y != 0)
-							axe = new CSG.Vector3D(nrm.y, nrm.x, nrm.z);
-						else
-							axe = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
-					}
-/*
-console.log(axe+'', ' Q:', Q|0);
+					axis = nrm.cross(tangent);
 
+					if (axis.lengthSquared() == 0) {//nrm and cur.tangent are collinear
+						if (nrm.x != 0 || nrm.y != 0) {
+console.log('@@@@@@@@ axis 1');
+							axis = new CSG.Vector3D(nrm.y, nrm.x, nrm.z);
+						} else {
+console.log('######### axis 2');
+							axis = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
+						}
+					}
+
+//console.log(axis+'', ' Q:', Q|0);
+/*
 if (this.lastTangent) {
 	//calculate angle between points
 	var cosF = this.lastTangent.dot(cur.tangent),
@@ -2658,8 +2710,16 @@ if (this.lastTangent) {
 	console.warn('angle: ', F);
 }
 this.lastTangent = cur.tangent;
+console.log('>>>>--------', csg.vertices.map(function(v, ind){
+	v.ind = ind;
+	return v.ind + ':' + v;
+}));
+				csg = csg.translate(cur.point).rotate(cur.point, axis, Q);
+console.log('<<<=======', csg.vertices.map(function(v, ind){
+	return v.ind+':'+v;
+}));
 */
-				return csg.translate(cur.point).rotate(cur.point, axe, Q);
+				return this._transform(csg, cur.point, axis, Q);
 			}
 			return null;
 		},
@@ -2716,13 +2776,14 @@ this.lastTangent = cur.tangent;
 		},
 		next : function() {
 			var param = this.loop ? this._getLoopParams() : this._getParams();
-			if (!param)
+			if (!param) {
+				this.current = null;
 				return null;
-
+			}
 			var t = param.t,
 				res = this.cmMatrix.leftMultiplyVector([0.5*t*t*t,0.5*t*t,0.5*t,0.5]);
 
-			return {
+			this.current = {
 				point: new CSG.Vector3D(
 					this._multiply4DVector(res, [param.point0.x, param.point1.x, param.point2.x, param.point3.x]),
 					this._multiply4DVector(res, [param.point0.y, param.point1.y, param.point2.y, param.point3.y]),
@@ -2734,6 +2795,7 @@ this.lastTangent = cur.tangent;
 					 0.5*(param.point2.z -param.point0.z) + (2*param.point0.z - 5*param.point1.z + 4*param.point2.z -param.point3.z) * t + 1.5 * (-param.point0.z + 3*param.point1.z- 3*param.point2.z + param.point3.z)*t*t
 				).unit()
 			};
+			return this.current;
 		}
 	}
 
@@ -2928,7 +2990,17 @@ CSG.Polygon.prototype = {
 		}
 		return result;
 	},
-
+	toPointCloud: function(cuberadius) {
+		var result = new CSG();
+		for (var i=0, iMax = this.vertices.length; i < iMax; i++) {
+			var cube = CSG.cube({
+				center: this.vertices[i].pos,
+				radius: cuberadius * ((iMax - i) / iMax + 0.05)
+			}).setColor(hsl2rgb(1, i / iMax,0.5));
+			result = result.unionSub(cube, false, false);
+		}
+		return result;
+	},
 	/**
 	 * Creates solid from slices (CSG.Polygon) by generating walls
 	 * @param {Object} options Solid generating options
@@ -2968,13 +3040,18 @@ CSG.Polygon.prototype = {
 				return t == 0 || t == 1 ? square.translate([0,0,t]) : null;
 			}
 		}
-		for(var i = 0, iMax = numSlices - 1; i <= iMax; i++) {
+/*		var sphere = CSG.sphere({
+				center: [0,0,0],
+				radius: 0.2
+			}).setColor([0.5,0,0]);
+		var rcsg = new CSG();
+*/		for(var i = 0, iMax = numSlices - 1; i <= iMax; i++) {
 			csg = fnCallback.call(this, i / iMax, i);
 			if (csg) {
 				if (!(csg instanceof CSG.Polygon)) {
 					throw new Error("CSG.Polygon.solidFromSlices callback error: CSG.Polygon expected");
 				}
-console.log('********* ' + csg);
+//console.log('********* ' + csg);
 				//csg.checkIfConvex();
 
 				if (prev) {//generate walls
@@ -2982,10 +3059,24 @@ console.log('********* ' + csg);
 						flipped = prev.plane.signedDistanceToPoint(csg.vertices[0].pos) < 0;
 					}
 					this._addWalls(polygons, prev, csg, flipped);
-
+/*		rcsg = rcsg.union([
+			sphere.translate(csg.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
+			sphere.translate(csg.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
+			sphere.translate(csg.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
+			sphere.translate(csg.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
+			sphere.translate(csg.vertices[4].pos).setColor([0.5, 0.5, 0.0])
+			]);
+*/
 				} else {//the first - will be a bottom
-					bottom = csg;
-				}
+					bottom = csg;//.flipped();
+/*		rcsg = rcsg.union([
+			sphere.translate(csg.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
+			sphere.translate(csg.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
+			sphere.translate(csg.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
+			sphere.translate(csg.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
+			sphere.translate(csg.vertices[4].pos).setColor([0.5, 0.5, 0.0])
+			]);
+*/				}
 				prev = csg;
 			} //callback can return null to skip that slice
 		}
@@ -3006,12 +3097,35 @@ console.log('********* ' + csg);
 			polygons.unshift(flipped ? bottom : bottom.flipped());
 			polygons.push(flipped ? top.flipped() : top);
 		}
-		var g = bottom.extrude(bottom.plane.normal).setColor(0,1,0);
-		var b = top.extrude(new CSG.Vector3D([-0.02,-0.97, 0.26])).setColor(0,0,1);
+
+//return rcsg;
+		//var g = bottom.extrude(bottom.plane.normal).setColor(0,1,0);
+		//var b = top.extrude(new CSG.Vector3D([-0.02,-0.97, 0.26])).setColor(0,0,1);
 		//var b = top.extrude(bottom.plane.normal).setColor(0,0,1);
 		//return b;//g;//.union(b);
 		//polygons = [flipped ? bottom : bottom.flipped(), flipped ? top.flipped() : top];
+// var csg = sphere.translate(bottom.vertices[0].pos).setColor([0.5, 0.0, 0.0]).union([
+// 	//sphere.translate(bottom.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
+// 	sphere.translate(bottom.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
+// 	sphere.translate(bottom.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
+// 	sphere.translate(bottom.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
+// 	sphere.translate(bottom.vertices[4].pos).setColor([0.5, 0.5, 0.0]),
+
+// 	sphere.translate(top.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
+// 	sphere.translate(top.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
+// 	sphere.translate(top.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
+// 	sphere.translate(top.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
+// 	sphere.translate(top.vertices[4].pos).setColor([0.5, 0.5, 0.0])
+// ]);
+// return csg;
 		return CSG.fromPolygons(polygons);
+	},
+	_getTriangle: function addWallsPutTriangle (pointA, pointB, pointC, color) {
+//console.log('getTriangle # A:' + pointA +' B:' + pointB + ' C:' + pointC);
+//var AB = pointA.pos.distanceToSquared(pointB.pos),BC = pointB.pos.distanceToSquared(pointC.pos),AC = pointA.pos.distanceToSquared(pointC.pos);
+//console.log('getTriangle # AB:' + AB +' BC:' + BC + ' AC:' + AC);
+		return new CSG.Polygon([pointA, pointB, pointC], color);
+		//return bFlipped ? triangle.flipped() : triangle;
 	},
 	/**
 	 *
@@ -3023,7 +3137,6 @@ console.log('********* ' + csg);
 		var bottomPoints = bottom.vertices.slice(0),//make a copy
 			topPoints = top.vertices.slice(0),//make a copy
 			color = top.shared || null;
-var bN = bottom.plane.normal;
 		//check if bottom perimeter is closed
 		if (!bottomPoints[0].pos.equals(bottomPoints[bottomPoints.length - 1].pos)) {
 			bottomPoints.push(bottomPoints[0]);
@@ -3033,9 +3146,9 @@ var bN = bottom.plane.normal;
 		if (!topPoints[0].pos.equals(topPoints[topPoints.length - 1].pos)) {
 			topPoints.push(topPoints[0]);
 		}
-console.log('------------------------- addWalls:', bFlipped);
-console.log('bottom: ', bottomPoints.map(function(point){return point+''}));
-console.log('top: ', topPoints.map(function(point){return point+''}));
+// console.log('------------------------- addWalls:', bFlipped);
+// console.log('bottom: ', bottomPoints.map(function(point){return point+''}));
+// console.log('top: ', topPoints.map(function(point){return point+''}));
 		if (bFlipped) {
 			bottomPoints = bottomPoints.reverse();
 			topPoints = topPoints.reverse();
@@ -3081,14 +3194,14 @@ console.log('top: ', topPoints.map(function(point){return point+''}));
 		} else { //find the minimal side length for the first bottom point
 			var point = bottomPoints[0],
 				minlen = Infinity,
-				topInd = 0;
+				topInd = 0,
+				len;
 			for (var i = 0; i < iTopLen; i++) {
 				len = topPoints[i].pos.distanceToSquared(point.pos);
 				if (len < minlen) {
 					minlen = len;
 					topInd = i;
 				}
-				console.info('i: len to bottom: ', topPoints[i].pos.dot(bottomPoints[i].pos));
 			}
 			//shift points to match
 			while(topInd) {
@@ -3098,34 +3211,27 @@ console.log('top: ', topPoints.map(function(point){return point+''}));
 		}//if
 		//sort by index
 		aMin.sort(fnSortByIndex);
-		var getTriangle = function addWallsPutTriangle (pointA, pointB, pointC, color) {
-//console.log('getTriangle # A:' + pointA +' B:' + pointB + ' C:' + pointC);
-var AB = pointA.pos.distanceToSquared(pointB.pos),BC = pointB.pos.distanceToSquared(pointC.pos),AC = pointA.pos.distanceToSquared(pointC.pos);
-console.log('getTriangle # AB:' + AB +' BC:' + BC + ' AC:' + AC);
-			return new CSG.Polygon([pointA, pointB, pointC], color);
-			//return bFlipped ? triangle.flipped() : triangle;
-		};
-
 		var bpoint = bottomPoints[0],
 			tpoint = topPoints[0],
 			secondPoint,
 			nBotFacet, nTopFacet, //length of triangle facet side
 			iB, iT, iMax;
-console.log('iMax: ', iTopLen + iBotLen);
+//console.log('iMax: ', iTopLen + iBotLen);
 		if (iExtra == 0) {//simple case - no need complexity
 			//iTopLen == iBotLen
-			for (iB = 0, iT = 0, iMax = iTopLen + iBotLen; iB + iT < iMax;) {
+			for (iB = 0, iT = 0, iMax = (iTopLen + iBotLen); iB + iT < iMax;) {
+//color = new CSG.Polygon.Shared(hsl2rgb(1,0.1*(iB+iT),0.5));
 				if (iB <= iT) {
-console.log('<<<<<<<<<<');
+//console.log('<<<<<<<<<<');
 					secondPoint = bottomPoints[++iB];
-					walls.push(getTriangle(
+					walls.push(this._getTriangle(
 						tpoint, bpoint, secondPoint, color
 					));
 					bpoint = secondPoint;
 				} else {
-console.log('>>>>>>>>');
+//console.log('>>>>>>>>');
 					secondPoint = topPoints[++iT];
-					walls.push(getTriangle(
+					walls.push(this._getTriangle(
 						secondPoint, tpoint, bpoint, color
 					));
 					tpoint = secondPoint;
@@ -3133,12 +3239,11 @@ console.log('>>>>>>>>');
 			}
 		} else //complex case
 		for (var iB = 0, iT = 0, iMax = iTopLen + iBotLen; iB + iT < iMax;) {
-color = new CSG.Polygon.Shared(hsl2rgb((iB + iT) / iMax,1,0.5));
 			if (aMin.length) {
 				if (bMoreTops && iT == aMin[0].index) {//one vertex is on the bottom, 2 - on the top
 					secondPoint = topPoints[++iT];
 					//console.log('<<< extra top: ' + secondPoint + ', ' + tpoint + ', bottom: ' + bpoint);
-					walls.push(getTriangle(
+					walls.push(this._getTriangle(
 						secondPoint, tpoint, bpoint, color
 					));
 					tpoint = secondPoint;
@@ -3146,7 +3251,7 @@ color = new CSG.Polygon.Shared(hsl2rgb((iB + iT) / iMax,1,0.5));
 					continue;
 				} else if (bMoreBottoms && iB == aMin[0].index) {
 					secondPoint = bottomPoints[++iB];
-					walls.push(getTriangle(
+					walls.push(this._getTriangle(
 						tpoint, bpoint, secondPoint, color
 					));
 					bpoint = secondPoint;
@@ -3168,7 +3273,7 @@ color = new CSG.Polygon.Shared(hsl2rgb((iB + iT) / iMax,1,0.5));
 			if (nBotFacet <= nTopFacet) {
 console.log('<<<<<<<<<<nBotFacet: ', nBotFacet, ' nTopFacet:', nTopFacet);
 				secondPoint = bottomPoints[++iB];
-				walls.push(getTriangle(
+				walls.push(this._getTriangle(
 					tpoint, bpoint, secondPoint, color
 				));
 				bpoint = secondPoint;
@@ -3176,7 +3281,7 @@ console.log('<<<<<<<<<<nBotFacet: ', nBotFacet, ' nTopFacet:', nTopFacet);
 console.log('>>>>>>>>nBotFacet: ', nBotFacet, ' nTopFacet:', nTopFacet);
 				secondPoint = topPoints[++iT];
 				//console.log('<<< top: ' + secondPoint + ', ' + tpoint + ', bottom: ' + bpoint);
-				walls.push(getTriangle(
+				walls.push(this._getTriangle(
 					secondPoint, tpoint, bpoint, color
 				));
 				tpoint = secondPoint;
@@ -3806,6 +3911,10 @@ CSG.Matrix4x4.prototype = {
 		var mirrorvalue = u.cross(v).dot(w);
 		var ismirror = (mirrorvalue < 0);
 		return ismirror;
+	},
+
+	toString: function(){
+		return this.elements.map(function(e){return e.toFixed(4)}).toString();
 	}
 };
 

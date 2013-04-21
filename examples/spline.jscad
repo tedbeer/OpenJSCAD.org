@@ -1,5 +1,15 @@
 // Catmull-Rom Splines http://steve.hollasch.net/cgindex/curves/catmull-rom.html
-
+function getV(start, dir, c1, c2, coef) {
+	return CSG.cylinder({
+			start: start,
+			end: dir.times(5*(coef||1)).plus(start),
+			radius: 0.2
+		}).setColor(c1).union(CSG.cylinder({
+			start: start,
+			end: dir.times(coef||1).plus(start),
+			radius: 0.21
+		}).setColor(c2 || c1));
+}
 function main(params) {
 	var r = 20,
 		a10 = Math.PI * 2 / 18, //10 deg
@@ -8,45 +18,40 @@ function main(params) {
 	for (var i = 0; i < 36; i++) {
 		points.push(new CSG.Vector3D(r * (i + 5) / 20 * Math.sin(a10 * i), r * (i + 5) / 20 * Math.cos(a10 * i), i * 1));
 	}
-/* celtic ring control points
-	points =
-	    [
-	    [0,     0,  1, 1],   //over across the middle
-	    [10,  10, -1, 0],  //under the first cross
-	    [20,  20,  1, 1],   //over the second cross
-	//  [30,  24,  0, 0],   //curving into the corner
-	    [39,  27.25,  0, 1],   // the sharp corner
-	//  [32,  12,  0, 0],
-	    [30,  10, -1, 0],
-	//  [28,  8,   0, 0],
-	    [20,  3.75,   0, 0],  // bottom of loop under the corner
-	    [10,  10,  1, 1],
-	    [4,   20,  0, 0], // grand curve near the sharp corner (under the long arc)
-	////    [6,   26,  0, 0],
-	//  [8,   28,  0, 0],
-	    [10,  30, -1, 0],
-	    [24,  34,  0, 0],
-	//  [30,  35,  0, 0], // top of the long arc
-	    [40,  34,  0, 0],
-	    [50,  30,  1, 1], // about where the long arc crosses over
-	//  [58,  22,  0, 0],
-	    [60,  20, -1, 0],
-	    [70,  10,  1, 1],
-	    [75,  5,  0, 0],
-	    [80,  0,  -1, 0]
-	//  [79.9, .1, -1, 0]   // under the middle (2 cycles right)
-	//  [79.95, .05, -1, 0]   // under the middle (2 cycles right)
-	].map(function(arr){
-		return new CSG.Vector3D(arr[0], arr[1], arr[2]);
-	});
-*/
-	//make a loop
-//	points.push(new CSG.Vector3D(points[0].x, points[0].y, 35));
-//	points.push(new CSG.Vector3D(points[0].x, points[0].y, 18));
-//	points.push(new CSG.Vector3D(points[0].x, points[0].y, 0));
 
-	var spline = new CSG.Spline.CatmullRom(points.slice(4, 8), 2);
-window.spline = spline;
+	var spline = new CSG.Spline.CatmullRom(points.slice(3, 15), 1);
+//window.spline = spline;
+
+	var radius = 5,
+		height = 60,
+		vec = new CSG.Vector3D(0, 5, 0),
+		angle;
+
+	var arrow = CSG.cylinder({
+		start: [0,0,0],
+		end: [0,0,20],
+		radius: 0.2
+	}).setColor([0,0.5,0.5]).union(CSG.cylinder({
+		start: [0,0,20],
+		end: [0,0,22],
+		radius: 0.35,
+		radiusEnd: 0.01
+	}).setColor([1,0,0]));
+
+	angle = 360 / 5;
+	var pent = CSG.Polygon.createFromPoints([
+					vec,//.rotateZ(0 * angle),
+					vec.rotateZ(1 * angle),
+					vec.rotateZ(2 * angle),
+					vec.rotateZ(3 * angle),
+					vec.rotateZ(4 * angle)
+					,vec
+				]).rotateY(90);
+
+/*	CSG.sphere({
+			center: p,
+			radius: 1
+		})
 /*
 	var arrow = CSG.cylinder({
 		start: [0,0,0],
@@ -59,27 +64,6 @@ window.spline = spline;
 		radiusEnd: 0.01
 	}).setColor([1,0,0]));
 
-	var pnt, arr = [];
-	while(pnt = spline.csgNext(arrow, new CSG.Vector3D([0,0,1]))) {
-		arr.push(spline._key == 38 ? pnt.setColor([0,0,1]) : pnt);
-	};
-	return arr;
-*/
-	var radius = 5,
-		height = 60,
-		vec = new CSG.Vector3D(0, 5, 0),
-		angle;
-
-	angle = 360 / 5;
-	var pent = CSG.Polygon.createFromPoints([
-					vec,//.rotateZ(0 * angle),
-					vec.rotateZ(1 * angle),
-					vec.rotateZ(2 * angle),
-					vec.rotateZ(3 * angle),
-					vec.rotateZ(4 * angle),
-					vec
-				]).rotateY(90);
-
 /*
     pent = pent.extrude([0,0,0.1]);
     var pnt, arr = [], l = spline.length(), t=0;
@@ -89,11 +73,85 @@ window.spline = spline;
 	return arr;
 */
 
-	return pent.solidFromSlices({
-		numslices: 2,//spline.length(),
+	var arr = [], mx, axis, center, tmx, nrm;
+	var csg = pent.solidFromSlices({
+		numslices: spline.length(),
 		loop: spline.loop,
 		callback: function(t, slice) {
-			return spline.csgNext(this);
+			var t= spline.csgNext(this);
+/*
+console.log(spline._dbg + '');
+console.log('tangent:' + spline.cur.tangent);
+/*
+ if (slice == 1) {
+    axis = spline._dbg.axis;
+ } else if (slice >= 2) {
+     center = spline._dbg.center,
+        degrees = spline._dbg.degrees;
+    mx = CSG.Matrix4x4.translation(center).multiply(
+    			CSG.Matrix4x4.rotation(center, axis, degrees)
+				)
+
+ }
+// tmx = CSG.Matrix4x4.translation(spline._dbg.center).multiply(
+// 	CSG.Matrix4x4.rotation(spline._dbg.center, axis, degrees)
+// );
+ t = this.transform(mx || spline._dbg.matrix);
+// 	var c =
+// 	t = t.rotate( pent)
+// }
+*/
+			arr.push(t.toPointCloud(0.5));
+//			arr.push(arrow.transform(spline._dbg.matrix));
+
+			center = t.vertices[0].pos;//spline._dbg.center;
+			arr.push(getV(center, spline.cur.tangent.negated(), [0.0,0.0,1.0], [1.0,0.0,0.0]));
+			arr.push(getV(center, this.plane.normal, [0.0,1.0,0.0], [0.0,1.0,1.0]));
+			arr.push(getV(center, spline._dbg.axis, [1.0,0.5,0.0], [0.0,0.5,0.0], 3));
+
+			return t;
+		}
+	});
+	arr.push(csg.setColor([1,0,0,0.6]));//arr.push(csg);
+	arr.push(pent.toPointCloud(0.5));
+	return arr;
+
+	var arr=[], solid1 = pent.solidFromSlices({
+		numslices: spline.length(),
+		loop: spline.loop,
+		callback: function(t, slice) {
+			var csg = spline.csgNext(this);
+			arr.push(arrow.transform(spline.mx));
+			return csg;
+		}
+	});
+	arr.unshift(solid1);
+	/*
+	spline.reset();
+	var pnt, arr = [solid1];
+	while(pnt = spline.csgNext(arrow, new CSG.Vector3D([0,0,1]))) {
+		arr.push(spline._key == 38 ? pnt.setColor([0,0,1]) : pnt);
+	};
+	*/
+	return arr;
+
+	return pent.solidFromSlices({
+		numslices: spline.length(),
+		loop: spline.loop,
+		callback: function(t, slice) {
+			return spline.csgNext(
+					arrow,
+					new CSG.Vector3D([0,0,1])
+				).union(spline.csgNext(this, null, spline.current));
+
+			var csg = spline.csgNext(this);
+			return csg.union(
+				spline.csgNext(
+					arrow,
+					new CSG.Vector3D([0,0,1]),
+					spline.current
+				)
+			);
 		}
 	});
 }
