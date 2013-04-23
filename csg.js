@@ -2607,6 +2607,8 @@ CSG.Spline.CatmullRom = function(points, steps) {
 	this._stop = this.points.length - (this.loop ? 1 : 3); //stop index
 	this._key = 0; //current key index
 	this._step = 0; //current step in segment
+	this._axisZ = new CSG.Vector3D(0, 0, 1);
+	this._zero = new CSG.Vector3D(0, 0, 0);
 	this.current = null;
 };
 
@@ -2636,24 +2638,18 @@ CSG.Spline.CatmullRom.prototype = {
 	},
 	//csg.translate.rotate messes up points
 	//
-	_transform: function (csg, center, axis, degrees) {
+	_transform: function (csg, center, axis, degrees, bDbgTranslate) {
 console.log(center.equals(csg.vertices[0].pos) ? '--------rotate' : '=========move&rotate');
 		//combined transformation
 
-		//center = center.minus(csg.vertices[0].pos);
-		//var mx = CSG.Matrix4x4.translation(center);
-
-		var mx = center.equals(csg.vertices[0].pos) ?
+		var mx = bDbgTranslate ? CSG.Matrix4x4.translation(center.minus(csg.vertices[0].pos)) :
+				(center.equals(csg.vertices[0].pos) ?
 				//rotate only
 				CSG.Matrix4x4.rotation(center, axis, degrees) :
 				//move and rotate
 				CSG.Matrix4x4.translation(center.minus(csg.vertices[0].pos)).multiply(
 					CSG.Matrix4x4.rotation(center, axis, degrees)
-				);
-		//var mx2 = CSG.Matrix4x4.rotation(center, axis, degrees);
-		// var mx = CSG.Matrix4x4.translation(center.minus(csg.vertices[0].pos)).multiply(
-		// 			CSG.Matrix4x4.rotation(center, axis, degrees)
-		// 		);
+				));
 
 		this._dbg = {
 			matrix: mx,
@@ -2667,19 +2663,12 @@ console.log(center.equals(csg.vertices[0].pos) ? '--------rotate' : '=========mo
 			}
 		};
 		if (csg instanceof CSG.Polygon) {
-//console.log('**************');
-//console.log('center: ' + center + ' axis: ' + axis + ' degrees: ' + degrees, 'mx.isMirroring: ', mx.isMirroring());
-//console.log('_transform: ' + csg.vertices.map(function(v){
-// 	return v.pos+'';
-// }));
 			var points = [];
 			for (var i = 0; i < csg.vertices.length; i++) {
 				var p = csg.vertices[i].pos.transform(mx);
 				points.push(p);
 			};
-//console.log('vec: ' + points[0]);
 			var csg2 = CSG.Polygon.createFromPoints(points);
-//console.log('vertices[0]: ' + csg2.vertices[0]);
 			return csg2;
 		}
 		var csg2 = csg.transform(mx);
@@ -2699,7 +2688,29 @@ console.log(center.equals(csg.vertices[0].pos) ? '--------rotate' : '=========mo
 				cosQ = nrm.unit().dot(vec),
 				Q = Math.acos(cosQ) * 180 / Math.PI,
 				axis = nrm.cross(vec),
-				plane;
+				side1 = csg.vertices[1].pos.minus(csg.vertices[0].pos).unit(),
+				plane,
+				//plane contains tangent and z-axis
+				planeTZ = CSG.Plane.fromVector3Ds(this._zero, this._axisZ, vec.negated()),
+				//plane contains tangent perpendicular and z-axis
+				planeTPZ = CSG.Plane.fromVector3Ds(this._zero, this._axisZ, planeTZ.normal),
+				//plane contains side1 and z-axis
+				planeSZ = CSG.Plane.fromVector3Ds(this._zero, this._axisZ, side1),
+				//vector in side plane, perp. Z-axis
+				sideZ = planeSZ.normal.cross(this._axisZ).unit(),
+				//vector in tangent plane, perp. Z-axis
+				tangentZ = planeTZ.normal.cross(this._axisZ).unit(),
+				cosQ1 = planeTZ.normal.unit().dot(sideZ),
+				//cosQ1 = planeTZ.normal.unit().dot(planeSZ.normal.unit()),
+				//cosQ1 = tangentZ.dot(planeSZ.normal.unit()),
+				Q1 = Math.acos(cosQ1) * 180 / Math.PI,
+				dir = planeTPZ.signedDistanceToPoint(sideZ) > 0 ? -1 : 1;
+this.planeTZ = planeTZ;
+this.planeSZ = planeSZ;
+this.tangentZ = tangentZ;
+this.sideZ = sideZ;
+console.log(cosQ1, '@@@@@@@@ Q1: ' + Q1);
+console.log('....' + planeTPZ.signedDistanceToPoint(sideZ));
 
 			if (axis.lengthSquared() == 0) {//nrm and cur.tangent are collinear
 				if (nrm.x != 0 || nrm.y != 0) {
@@ -2710,34 +2721,38 @@ console.log(center.equals(csg.vertices[0].pos) ? '--------rotate' : '=========mo
 					axis = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
 				}
 			}
-			if (bStart) {//calculate offset for the second curve || spline curve
-				this.secondCurveVec = csg.vertices[1].pos.minus(csg.vertices[0].pos).unit();
-			}
 
 			if (bStart) {
-				this.axisZ = new CSG.Vector3D(0, 0, 1);
-				cosQ = this.axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
-				this.zQ = Math.acos(cosQ) * 180 / Math.PI;
+				//save angle between one side and Z-axis
+				//each polygon after transformation must have the same
+				// cosQ = this._axisZ.dot(side1);
+				// this.zQ = Math.acos(cosQ) * 180 / Math.PI;
 			}
+			//to keep proper polygon orientation
+			// 1. move polygon to next point on the spline
+			// 2. rotate the polygon around Z-axis to make polygon plane perpendicular to
+			//	a plane (tangent, z-axis) - it keeps the angle between side-1 and z-axis
+			// 3. rotate the polygon around side-1 to make the tangent the polygon plane normal
 
-			csg = this._transform(csg, cur.point, axis, Q);
+			//csg = this._transform(csg, cur.point, axis, Q);
+			csg = this._transform(csg, cur.point, this._axisZ, dir * Q1);
 
 			axis = csg.plane.normal;
-			var plane = CSG.Plane.fromVector3Ds(new CSG.Vector3D(0, 0, 0), this.axisZ, axis),
+			var plane = CSG.Plane.fromVector3Ds(this._zero, this._axisZ, axis),
 				flipped = plane.signedDistanceToPoint(csg.vertices[1].pos) < 0;
 
-			cosQ = this.axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
+			cosQ = this._axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
 			Q = Math.acos(cosQ) * 180 / Math.PI;
 
 //console.log(this.zQ + '\nQ:' + Q + '\n' + (this.zQ - Q), flipped);
 			//rotate polygon to match side
-			if (Math.abs(this.zQ - Q) > 0.00001) { // > 0
+			if (0 && Math.abs(this.zQ - Q) > 0.00001) { // > 0
 				//incorrect angle is used but it's better then before
 				csg = this._transform(csg, csg.vertices[0].pos, axis,
 					flipped ? this.zQ - Q : (360 - Q - this.zQ));
 			}
 
-			cosQ = this.axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
+			cosQ = this._axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
 			Q = Math.acos(cosQ) * 180 / Math.PI;
 //console.log('................'+Q);
 
@@ -3098,7 +3113,7 @@ console.info('@@@@@@@@ flipped: ', flipped);
 					}
 					this._addWalls(polygons, prev, csg, flipped);
 				} else {//the first - will be a bottom
-					bottom = csg.flipped();
+					bottom = csg;//.flipped();
 				}
 				prev = csg;
 			} //callback can return null to skip that slice

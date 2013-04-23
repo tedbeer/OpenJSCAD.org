@@ -19,7 +19,7 @@ function main(params) {
 		points.push(new CSG.Vector3D(r * (i + 5) / 20 * Math.sin(a10 * i), r * (i + 5) / 20 * Math.cos(a10 * i), i * 1));
 	}
 
-	var spline = new CSG.Spline.CatmullRom(points.slice(0, 10), 1);
+	var spline = new CSG.Spline.CatmullRom(points, 1);//.slice(0, 16), 1);
 //window.spline = spline;
 
 	var radius = 5,
@@ -37,7 +37,7 @@ function main(params) {
 			radius: 0.35,
 			radiusEnd: 0.01
 		}).setColor([1,0,0])),
-		nSides = 3, //5
+		nSides = 5,
 		angle = 360 / nSides,
 		allP = [vec//.rotateZ(0 * angle),
 				,vec.rotateZ(1 * angle)
@@ -58,31 +58,22 @@ function main(params) {
 		loop: spline.loop,
 		callback: function(t, slice) {
 			var t= spline.csgNext(this);
-			arr.push(t.toPointCloud(0.5));
+//			arr.push(t.toPointCloud(0.5));
 
 			center = t.vertices[0].pos;//spline._dbg.center;
-			arr.push(getV(center, t.plane.normal, [1.0,0.5,0.0], [0.0,0.5,0.0]));
-			arr.push(getV(center, t.vertices[1].pos.minus(center), [0.0,1.0,0.0], [0.0,1.0,1.0], 0.3));
-			// arr.push(getV(center,
-			// 	spline.secondCurveVec.transform(spline._dbg.matrix),
-			// 	[0.0,0.0,1.0], [0.0,1.0,1.0], 0.1));
-			//arr.push(getV(center, spline.secondCurveVec, [0.0,0.0,1.0], [0.0,1.0,1.0]));
+			//arr.push(getV(center, t.plane.normal, [1.0,0.5,0.0], [0.0,0.5,0.0]));
+//			arr.push(getV(center, spline.planeTZ.normal, [1.0,0.0,0.0], [0.0,0.5,0.0]));
+			//arr.push(getV(center, spline.tangentZ, [1.0,0.0,0.0], [0.0,0.5,0.0]));
+			//arr.push(getV(center, spline.planeSZ.normal, [1.0,0.5,1.0], [0.0,0.5,0.0]));
+//			arr.push(getV(center, spline.sideZ, [1.0,0.5,1.0], [0.0,0.5,0.0]));
 
-			// arr.push(getV(center, spline.cur.tangent.negated(), [0.0,0.0,1.0], [1.0,0.0,0.0]));
-			// arr.push(getV(center, this.plane.normal, [0.0,1.0,0.0], [0.0,1.0,1.0]));
-			// arr.push(getV(center, spline._dbg.axis, [1.0,0.5,0.0], [0.0,0.5,0.0], 3));
-
-			if (spline.vec) {
-				center = t.vertices[0].pos;
-				// arr.push(getV(center, spline.vec, [1.0, 0.0, 0.0], [1.0,0.0,0.0], 0.3));
-				// arr.push(getV(center, spline.secondCurveVec, [0.0, 1.0, 0.0], [0.0, 1.0, 1.0]));
-				// arr.push(getV(center, spline.axis, [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]));
-			}
+//			arr.push(getV(center, t.vertices[1].pos.minus(center), [0.0,1.0,0.0], [0.0,1.0,1.0], 0.3));
+			//arr.push(getV(center, spline.cur.tangent.negated(), [0.0,0.0,1.0], [1.0,0.0,0.0]));
 
 			return t;
 		}
 	});
-	//arr.push(csg.setColor([1,0,0,0.9]));//arr.push(csg);
+	arr.push(csg);//.setColor([1,0,0,0.9]));//arr.push(csg);
 	arr.push(pent.toPointCloud(0.5));
 	return arr;
 
