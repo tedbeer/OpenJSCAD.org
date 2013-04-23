@@ -2582,124 +2582,166 @@ CSG.Plane.prototype = {
 	}
 };
 
-	CSG.Spline = {
-	};
-	/**
-	 * Implementation of Catmull-Rom splines
-	 * http://en.wikipedia.org/wiki/Catmull-Rom_spline#Catmull.E2.80.93Rom_spline
-	 * http://steve.hollasch.net/cgindex/curves/catmull-rom.html
-	 *
-	 * @param {Array} points Array of key points to pass
-	 * @param {Number} steps Number of generated intermidiate points between key points pairs
-	 *
-	 */
-	CSG.Spline.CatmullRom = function(points, steps) {
-		if (points.length < 4)
-			throw new Error("CSG.Spline.CatmullRom error: at least 4 points required");
-		//if the first point is the same as the last - it's a loop
-		var bLoop = points[0].equals(points[points.length - 1]);
+CSG.Spline = {
+};
+/**
+ * Implementation of Catmull-Rom splines
+ * http://en.wikipedia.org/wiki/Catmull-Rom_spline#Catmull.E2.80.93Rom_spline
+ * http://steve.hollasch.net/cgindex/curves/catmull-rom.html
+ *
+ * @param {Array} points Array of key points to pass
+ * @param {Number} steps Number of generated intermidiate points between key points pairs
+ *
+ */
+CSG.Spline.CatmullRom = function(points, steps) {
+	if (points.length < 4)
+		throw new Error("CSG.Spline.CatmullRom error: at least 4 points required");
+	//if the first point is the same as the last - it's a loop
+	var bLoop = points[0].equals(points[points.length - 1]);
 
-		this.points = points.slice(bLoop ? 1 : 0);
-		this._plength = this.points.length;
-		this.loop = bLoop;
-		this.steps = steps|0||1; //convert to int
-		this.cmMatrix = new CSG.Matrix4x4([-1, 3,-3, 1, 2,-5, 4,-1,-1, 0, 1, 0, 0, 2, 0, 0]);
-		this._stop = this.points.length - (this.loop ? 1 : 3); //stop index
-		this._key = 0; //current key index
-		this._step = 0; //current step in segment
+	this.points = points.slice(bLoop ? 1 : 0);
+	this._plength = this.points.length;
+	this.loop = bLoop;
+	this.steps = steps|0||1; //convert to int
+	this.cmMatrix = new CSG.Matrix4x4([-1, 3,-3, 1, 2,-5, 4,-1,-1, 0, 1, 0, 0, 2, 0, 0]);
+	this._stop = this.points.length - (this.loop ? 1 : 3); //stop index
+	this._key = 0; //current key index
+	this._step = 0; //current step in segment
+	this.current = null;
+};
+
+CSG.Spline.CatmullRom.prototype = {
+	_multiply4DVector: function (v1, v2) {
+		var res = 0;
+		for(var i = 0; i < v1.length; i++)
+			res += v1[i] * v2[i];
+		return res;
+	},
+	length : function() {
+		//number of curve points - key and intermediate points
+		var nSegments, nPoints;
+		if (this.loop) {
+			nSegments = this.points.length; //each path point starts a segment
+			nPoints = nSegments * this.steps; //all segments are [0..steps-1)
+		} else {
+			nSegments = this.points.length - 3;
+			nPoints = nSegments * this.steps + 1; //all segments are [0..steps-1) but the last is [0..steps-1]
+		}
+		return nPoints;
+	},
+	reset : function() {
+		this._key = 0;//current key index
+		this._step = 0;//current intermediate index
 		this.current = null;
-	};
+	},
+	//csg.translate.rotate messes up points
+	//
+	_transform: function (csg, center, axis, degrees) {
+console.log(center.equals(csg.vertices[0].pos) ? '--------rotate' : '=========move&rotate');
+		//combined transformation
 
-	CSG.Spline.CatmullRom.prototype = {
-		_multiply4DVector: function (v1, v2) {
-			var res = 0;
-			for(var i = 0; i < v1.length; i++)
-				res += v1[i] * v2[i];
-			return res;
-		},
-		length : function() {
-			//number of curve points - key and intermediate points
-			var nSegments, nPoints;
-			if (this.loop) {
-				nSegments = this.points.length; //each path point starts a segment
-				nPoints = nSegments * this.steps; //all segments are [0..steps-1)
-			} else {
-				nSegments = this.points.length - 3;
-				nPoints = nSegments * this.steps + 1; //all segments are [0..steps-1) but the last is [0..steps-1]
+		//center = center.minus(csg.vertices[0].pos);
+		//var mx = CSG.Matrix4x4.translation(center);
+
+		var mx = center.equals(csg.vertices[0].pos) ?
+				//rotate only
+				CSG.Matrix4x4.rotation(center, axis, degrees) :
+				//move and rotate
+				CSG.Matrix4x4.translation(center.minus(csg.vertices[0].pos)).multiply(
+					CSG.Matrix4x4.rotation(center, axis, degrees)
+				);
+		//var mx2 = CSG.Matrix4x4.rotation(center, axis, degrees);
+		// var mx = CSG.Matrix4x4.translation(center.minus(csg.vertices[0].pos)).multiply(
+		// 			CSG.Matrix4x4.rotation(center, axis, degrees)
+		// 		);
+
+		this._dbg = {
+			matrix: mx,
+			axis: axis,
+			center: center,
+			degrees: degrees,
+			toString: function(){
+				return this.matrix + '\ncenter:' +
+						this.center + '\naxis:' +
+						this.axis + '\nangle:' + this.degrees;
 			}
-			return nPoints;
-		},
-		reset : function() {
-			this._key = 0;//current key index
-			this._step = 0;//current intermediate index
-			this.current = null;
-		},
-		//csg.translate.rotate messes up points
-		//
-		_transform: function (csg, center, axis, degrees) {
-//console.log(' axis: ' + axis + ' degrees: ' + degrees);
-			//combined transformation
-			//center = csg.vertices[0].pos.add(center);
-			var mx = CSG.Matrix4x4.translation(center);/*.multiply(
-				CSG.Matrix4x4.rotation(center, axis, degrees)
-				);*/
-			//var mx2 = CSG.Matrix4x4.rotation(center, axis, degrees);
-
-			this._dbg = {
-				matrix: mx,
-				axis: axis,
-				center: center,
-				degrees: degrees,
-				toString: function(){
-					return this.matrix + '\ncenter:' +
-							this.center + '\naxis:' +
-							this.axis + '\nangle:' + this.degrees;
-				}
-			};
-			if (csg instanceof CSG.Polygon) {
-console.log('**************');
+		};
+		if (csg instanceof CSG.Polygon) {
+//console.log('**************');
 //console.log('center: ' + center + ' axis: ' + axis + ' degrees: ' + degrees, 'mx.isMirroring: ', mx.isMirroring());
 //console.log('_transform: ' + csg.vertices.map(function(v){
 // 	return v.pos+'';
 // }));
-				var points = [];
-				for (var i = 0; i < csg.vertices.length; i++) {
-					var p = csg.vertices[i].pos.transform(mx);
-					points.push(
-						p.transform(
-							CSG.Matrix4x4.rotation(points[0] || p, axis, degrees)));
-				};
-console.log('vec: ' + points[0]);
-				var csg2 = CSG.Polygon.createFromPoints(points);
+			var points = [];
+			for (var i = 0; i < csg.vertices.length; i++) {
+				var p = csg.vertices[i].pos.transform(mx);
+				points.push(p);
+			};
+//console.log('vec: ' + points[0]);
+			var csg2 = CSG.Polygon.createFromPoints(points);
 //console.log('vertices[0]: ' + csg2.vertices[0]);
-				return csg2;
-			}
-			var csg2 = csg.transform(mx);
 			return csg2;
-		},
-		//TODO: can I always use [0,0,1] as a normal ?
-		csgNext : function(csg, nrm, tr) {
-			var bStart = this._key == 0 && this._step == 0;
-			var cur = tr || this.next();
-			if (cur) {
-				this.cur = cur;
-				if (!nrm)
-					nrm = csg.plane.normal;
+		}
+		var csg2 = csg.transform(mx);
+		return csg2;
+	},
+	//TODO: can I always use [0,0,1] as a normal ?
+	csgNext : function(csg, nrm, tr) {
+		var bStart = this._key == 0 && this._step == 0;
+		var cur = tr || this.next();
+		if (cur) {
+			this.cur = cur;
+			if (!nrm) {
+				nrm = csg.plane.normal;
+			}
+			//turn csg to have the tangent as its normal
+			var vec = cur.tangent.negated(),
+				cosQ = nrm.unit().dot(vec),
+				Q = Math.acos(cosQ) * 180 / Math.PI,
+				axis = nrm.cross(vec),
+				plane;
 
-				var tangent = cur.tangent.negated(),
-					cosQ = nrm.unit().dot(tangent),
-					Q = Math.acos(cosQ) * 180 / Math.PI,
-					axis = nrm.cross(tangent);
+			if (axis.lengthSquared() == 0) {//nrm and cur.tangent are collinear
+				if (nrm.x != 0 || nrm.y != 0) {
+//console.log('@@@@@@@@ axis 1');
+					axis = new CSG.Vector3D(nrm.y, nrm.x, nrm.z);
+				} else {
+//console.log('######### axis 2');
+					axis = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
+				}
+			}
+			if (bStart) {//calculate offset for the second curve || spline curve
+				this.secondCurveVec = csg.vertices[1].pos.minus(csg.vertices[0].pos).unit();
+			}
 
-					if (axis.lengthSquared() == 0) {//nrm and cur.tangent are collinear
-						if (nrm.x != 0 || nrm.y != 0) {
-console.log('@@@@@@@@ axis 1');
-							axis = new CSG.Vector3D(nrm.y, nrm.x, nrm.z);
-						} else {
-console.log('######### axis 2');
-							axis = new CSG.Vector3D(nrm.x, nrm.z, nrm.y);
-						}
-					}
+			if (bStart) {
+				this.axisZ = new CSG.Vector3D(0, 0, 1);
+				cosQ = this.axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
+				this.zQ = Math.acos(cosQ) * 180 / Math.PI;
+			}
+
+			csg = this._transform(csg, cur.point, axis, Q);
+
+			axis = csg.plane.normal;
+			var plane = CSG.Plane.fromVector3Ds(new CSG.Vector3D(0, 0, 0), this.axisZ, axis),
+				flipped = plane.signedDistanceToPoint(csg.vertices[1].pos) < 0;
+
+			cosQ = this.axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
+			Q = Math.acos(cosQ) * 180 / Math.PI;
+
+//console.log(this.zQ + '\nQ:' + Q + '\n' + (this.zQ - Q), flipped);
+			//rotate polygon to match side
+			if (Math.abs(this.zQ - Q) > 0.00001) { // > 0
+				//incorrect angle is used but it's better then before
+				csg = this._transform(csg, csg.vertices[0].pos, axis,
+					flipped ? this.zQ - Q : (360 - Q - this.zQ));
+			}
+
+			cosQ = this.axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
+			Q = Math.acos(cosQ) * 180 / Math.PI;
+//console.log('................'+Q);
+
+			return csg;
 
 //console.log(axis+'', ' Q:', Q|0);
 /*
@@ -2719,85 +2761,85 @@ console.log('<<<=======', csg.vertices.map(function(v, ind){
 	return v.ind+':'+v;
 }));
 */
-				return this._transform(csg, cur.point, axis, Q);
-			}
+			return this._transform(csg, cur.point, axis, Q);
+		}
+		return null;
+	},
+	_getParams : function() {
+		if (this._key > this._stop) //run out of points
 			return null;
-		},
-		_getParams : function() {
-			if (this._key > this._stop) //run out of points
-				return null;
 
-			var ret = {
-					point0: this.points[this._key],
-					point1: this.points[this._key + 1],
-					point2: this.points[this._key + 2],
-					point3: this.points[this._key + 3],
-					t: this._step / this.steps
-				};
+		var ret = {
+				point0: this.points[this._key],
+				point1: this.points[this._key + 1],
+				point2: this.points[this._key + 2],
+				point3: this.points[this._key + 3],
+				t: this._step / this.steps
+			};
 
-			//advance the indices
-			//last segment, last point was generated
-			if (this._step == this.steps) {
-				this._key = this._stop + 1; //set invalid value
+		//advance the indices
+		//last segment, last point was generated
+		if (this._step == this.steps) {
+			this._key = this._stop + 1; //set invalid value
 
-			} else {//normal flow
-				this._step++;
-				if (this._step == this.steps) {
-					this._key++;
-					this._step = 0;
-				}
-				//last segment, last point
-				if (this._key == this._stop) {
-					this._key--;
-					this._step = this.steps;
-				}
-			}
-			return ret;
-		},
-		_getLoopParams : function() {
-			if (this._key > this._stop) //run out of points
-				return null;
-			var ret = {
-					point0: this.points[this._key],
-					point1: this.points[(this._key + 1) % this._plength],
-					point2: this.points[(this._key + 2) % this._plength],
-					point3: this.points[(this._key + 3) % this._plength],
-					t: this._step / this.steps
-				};
-
-			//advance the indices
-			//normal flow
+		} else {//normal flow
 			this._step++;
 			if (this._step == this.steps) {
 				this._key++;
 				this._step = 0;
 			}
-			return ret;
-		},
-		next : function() {
-			var param = this.loop ? this._getLoopParams() : this._getParams();
-			if (!param) {
-				this.current = null;
-				return null;
+			//last segment, last point
+			if (this._key == this._stop) {
+				this._key--;
+				this._step = this.steps;
 			}
-			var t = param.t,
-				res = this.cmMatrix.leftMultiplyVector([0.5*t*t*t,0.5*t*t,0.5*t,0.5]);
-
-			this.current = {
-				point: new CSG.Vector3D(
-					this._multiply4DVector(res, [param.point0.x, param.point1.x, param.point2.x, param.point3.x]),
-					this._multiply4DVector(res, [param.point0.y, param.point1.y, param.point2.y, param.point3.y]),
-					this._multiply4DVector(res, [param.point0.z, param.point1.z, param.point2.z, param.point3.z])
-					),
-				tangent: new CSG.Vector3D(
-					 0.5*(param.point2.x -param.point0.x) + (2*param.point0.x - 5*param.point1.x + 4*param.point2.x -param.point3.x) * t + 1.5 * (-param.point0.x + 3*param.point1.x- 3*param.point2.x + param.point3.x)*t*t,
-					 0.5*(param.point2.y -param.point0.y) + (2*param.point0.y - 5*param.point1.y + 4*param.point2.y -param.point3.y) * t + 1.5 * (-param.point0.y + 3*param.point1.y- 3*param.point2.y + param.point3.y)*t*t,
-					 0.5*(param.point2.z -param.point0.z) + (2*param.point0.z - 5*param.point1.z + 4*param.point2.z -param.point3.z) * t + 1.5 * (-param.point0.z + 3*param.point1.z- 3*param.point2.z + param.point3.z)*t*t
-				).unit()
-			};
-			return this.current;
 		}
+		return ret;
+	},
+	_getLoopParams : function() {
+		if (this._key > this._stop) //run out of points
+			return null;
+		var ret = {
+				point0: this.points[this._key],
+				point1: this.points[(this._key + 1) % this._plength],
+				point2: this.points[(this._key + 2) % this._plength],
+				point3: this.points[(this._key + 3) % this._plength],
+				t: this._step / this.steps
+			};
+
+		//advance the indices
+		//normal flow
+		this._step++;
+		if (this._step == this.steps) {
+			this._key++;
+			this._step = 0;
+		}
+		return ret;
+	},
+	next : function() {
+		var param = this.loop ? this._getLoopParams() : this._getParams();
+		if (!param) {
+			this.current = null;
+			return null;
+		}
+		var t = param.t,
+			res = this.cmMatrix.leftMultiplyVector([0.5*t*t*t,0.5*t*t,0.5*t,0.5]);
+
+		this.current = {
+			point: new CSG.Vector3D(
+				this._multiply4DVector(res, [param.point0.x, param.point1.x, param.point2.x, param.point3.x]),
+				this._multiply4DVector(res, [param.point0.y, param.point1.y, param.point2.y, param.point3.y]),
+				this._multiply4DVector(res, [param.point0.z, param.point1.z, param.point2.z, param.point3.z])
+				),
+			tangent: new CSG.Vector3D(
+				 0.5*(param.point2.x -param.point0.x) + (2*param.point0.x - 5*param.point1.x + 4*param.point2.x -param.point3.x) * t + 1.5 * (-param.point0.x + 3*param.point1.x- 3*param.point2.x + param.point3.x)*t*t,
+				 0.5*(param.point2.y -param.point0.y) + (2*param.point0.y - 5*param.point1.y + 4*param.point2.y -param.point3.y) * t + 1.5 * (-param.point0.y + 3*param.point1.y- 3*param.point2.y + param.point3.y)*t*t,
+				 0.5*(param.point2.z -param.point0.z) + (2*param.point0.z - 5*param.point1.z + 4*param.point2.z -param.point3.z) * t + 1.5 * (-param.point0.z + 3*param.point1.z- 3*param.point2.z + param.point3.z)*t*t
+			).unit()
+		};
+		return this.current;
 	}
+};
 
 // # class Polygon
 // Represents a convex polygon. The vertices used to initialize a polygon must
@@ -3040,12 +3082,7 @@ CSG.Polygon.prototype = {
 				return t == 0 || t == 1 ? square.translate([0,0,t]) : null;
 			}
 		}
-/*		var sphere = CSG.sphere({
-				center: [0,0,0],
-				radius: 0.2
-			}).setColor([0.5,0,0]);
-		var rcsg = new CSG();
-*/		for(var i = 0, iMax = numSlices - 1; i <= iMax; i++) {
+		for(var i = 0, iMax = numSlices - 1; i <= iMax; i++) {
 			csg = fnCallback.call(this, i / iMax, i);
 			if (csg) {
 				if (!(csg instanceof CSG.Polygon)) {
@@ -3057,26 +3094,12 @@ CSG.Polygon.prototype = {
 				if (prev) {//generate walls
 					if (flipped === null) {//not generated yet
 						flipped = prev.plane.signedDistanceToPoint(csg.vertices[0].pos) < 0;
+console.info('@@@@@@@@ flipped: ', flipped);
 					}
 					this._addWalls(polygons, prev, csg, flipped);
-/*		rcsg = rcsg.union([
-			sphere.translate(csg.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
-			sphere.translate(csg.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
-			sphere.translate(csg.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
-			sphere.translate(csg.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
-			sphere.translate(csg.vertices[4].pos).setColor([0.5, 0.5, 0.0])
-			]);
-*/
 				} else {//the first - will be a bottom
-					bottom = csg;//.flipped();
-/*		rcsg = rcsg.union([
-			sphere.translate(csg.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
-			sphere.translate(csg.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
-			sphere.translate(csg.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
-			sphere.translate(csg.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
-			sphere.translate(csg.vertices[4].pos).setColor([0.5, 0.5, 0.0])
-			]);
-*/				}
+					bottom = csg.flipped();
+				}
 				prev = csg;
 			} //callback can return null to skip that slice
 		}
@@ -3098,26 +3121,6 @@ CSG.Polygon.prototype = {
 			polygons.push(flipped ? top.flipped() : top);
 		}
 
-//return rcsg;
-		//var g = bottom.extrude(bottom.plane.normal).setColor(0,1,0);
-		//var b = top.extrude(new CSG.Vector3D([-0.02,-0.97, 0.26])).setColor(0,0,1);
-		//var b = top.extrude(bottom.plane.normal).setColor(0,0,1);
-		//return b;//g;//.union(b);
-		//polygons = [flipped ? bottom : bottom.flipped(), flipped ? top.flipped() : top];
-// var csg = sphere.translate(bottom.vertices[0].pos).setColor([0.5, 0.0, 0.0]).union([
-// 	//sphere.translate(bottom.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
-// 	sphere.translate(bottom.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
-// 	sphere.translate(bottom.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
-// 	sphere.translate(bottom.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
-// 	sphere.translate(bottom.vertices[4].pos).setColor([0.5, 0.5, 0.0]),
-
-// 	sphere.translate(top.vertices[0].pos).setColor([0.5, 0.0, 0.0]),
-// 	sphere.translate(top.vertices[1].pos).setColor([0.0, 0.5, 0.0]),
-// 	sphere.translate(top.vertices[2].pos).setColor([0.0, 0.0, 0.5]),
-// 	sphere.translate(top.vertices[3].pos).setColor([0.0, 0.5, 0.5]),
-// 	sphere.translate(top.vertices[4].pos).setColor([0.5, 0.5, 0.0])
-// ]);
-// return csg;
 		return CSG.fromPolygons(polygons);
 	},
 	_getTriangle: function addWallsPutTriangle (pointA, pointB, pointC, color) {
