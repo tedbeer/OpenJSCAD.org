@@ -2736,25 +2736,18 @@ console.log('....' + planeTPZ.signedDistanceToPoint(sideZ));
 
 			//csg = this._transform(csg, cur.point, axis, Q);
 			csg = this._transform(csg, cur.point, this._axisZ, dir * Q1);
+			side1 = csg.vertices[1].pos.minus(csg.vertices[0].pos).unit();
 
-			axis = csg.plane.normal;
-			var plane = CSG.Plane.fromVector3Ds(this._zero, this._axisZ, axis),
-				flipped = plane.signedDistanceToPoint(csg.vertices[1].pos) < 0;
 
-			cosQ = this._axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
+			cosQ = csg.plane.normal.unit().dot(vec);
 			Q = Math.acos(cosQ) * 180 / Math.PI;
 
-//console.log(this.zQ + '\nQ:' + Q + '\n' + (this.zQ - Q), flipped);
+console.log('................'+Q);
 			//rotate polygon to match side
-			if (0 && Math.abs(this.zQ - Q) > 0.00001) { // > 0
+			if (1) { // > 0
 				//incorrect angle is used but it's better then before
-				csg = this._transform(csg, csg.vertices[0].pos, axis,
-					flipped ? this.zQ - Q : (360 - Q - this.zQ));
+				csg = this._transform(csg, cur.point, side1, -Q);
 			}
-
-			cosQ = this._axisZ.dot(csg.vertices[1].pos.minus(csg.vertices[0].pos).unit());
-			Q = Math.acos(cosQ) * 180 / Math.PI;
-//console.log('................'+Q);
 
 			return csg;
 
